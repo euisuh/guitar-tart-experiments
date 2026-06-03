@@ -1,0 +1,23 @@
+# Data and checkpoints
+data/raw/
+checkpoints/
+wandb/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Env
+.env
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
