@@ -1,19 +1,15 @@
 """
 Converts Guitar-TECHS raw audio files to a unified annotations.csv.
 
-Guitar-TECHS expected directory layout after extraction:
+Actual Guitar-TECHS layout (P1/P2 techniques + singlenotes):
   data/raw/guitar-techs/
-    audio/
-      musician1/
-        technique_name/   <- folder name = technique label
-          egocentric.wav
-          exocentric.wav
-          di.wav
-          amp.wav
-      musician2/
-        ...
+    P1_techniques/audio/{directinput,micamp}/{channel}_{TechniqueName}.wav
+    P1_singlenotes/audio/{directinput,micamp}/{channel}_allsinglenotes.wav
+    P2_techniques/  (same structure)
+    P2_singlenotes/ (same structure)
 
-If the actual layout differs, update _discover_segments() to match.
+Technique is encoded in the filename stem (after the channel prefix).
+Each WAV is a long continuous recording — sliced into 10s segments with 1s hop.
 
 Annotations CSV schema: audio_path, start_sec, end_sec, technique, channel
 """
@@ -22,59 +18,76 @@ import argparse
 import csv
 from pathlib import Path
 
-TECHNIQUE_MAP = {
-    "bend": "bend",
+# Map lowercase filename keyword → canonical technique label
+FILENAME_TECHNIQUE_MAP = {
+    "bendings": "bend",
     "bending": "bend",
-    "vibrato": "vibrato",
-    "palm_mute": "palm_mute",
-    "palm mute": "palm_mute",
-    "pinch_harmonic": "pinch_harmonic",
-    "pinch harmonic": "pinch_harmonic",
+    "harmonics": "harmonic",
     "harmonic": "harmonic",
-    "natural_harmonic": "harmonic",
+    "palmmute": "palm_mute",
+    "palm_mute": "palm_mute",
+    "pinchharmonics": "pinch_harmonic",
+    "pinch_harmonics": "pinch_harmonic",
+    "pinchharmonic": "pinch_harmonic",
+    "vibrato": "vibrato",
+    "allsinglenotes": "clean",
+    "singlenotes": "clean",
     "clean": "clean",
-    "normal": "clean",
-    "single_note": "clean",
 }
 
-CHANNELS = ["egocentric", "exocentric", "di", "amp"]
+SEGMENT_LENGTH = 10.0   # seconds, matches TART protocol
+HOP_LENGTH = 1.0        # seconds
+
+
+def _technique_from_stem(stem: str) -> str | None:
+    """Extract technique label from filename stem like 'directinput_PalmMute'."""
+    # Remove channel prefix (everything before first underscore)
+    parts = stem.split("_", 1)
+    name = parts[-1].lower().replace("_", "")
+    return FILENAME_TECHNIQUE_MAP.get(name)
+
+
+def _channel_from_folder(folder_name: str) -> str:
+    folder = folder_name.lower()
+    if "directinput" in folder or "di" in folder:
+        return "directinput"
+    if "micamp" in folder or "mic" in folder:
+        return "micamp"
+    return folder
 
 
 def _discover_segments(data_dir: Path) -> list:
-    import torchaudio
+    import soundfile as sf
 
     records = []
-    audio_root = data_dir / "audio"
 
-    if not audio_root.exists():
-        audio_root = data_dir
+    for wav_path in sorted(data_dir.rglob("*.wav")):
+        if "__MACOSX" in str(wav_path):
+            continue
 
-    for wav_path in sorted(audio_root.rglob("*.wav")):
-        # Infer technique from parent directory name
-        technique_raw = wav_path.parent.name.lower()
-        technique = TECHNIQUE_MAP.get(technique_raw)
-        if technique is None:
-            technique_raw = wav_path.parent.parent.name.lower()
-            technique = TECHNIQUE_MAP.get(technique_raw)
+        technique = _technique_from_stem(wav_path.stem)
         if technique is None:
             continue
 
-        stem = wav_path.stem.lower()
-        channel = next((c for c in CHANNELS if c in stem), "unknown")
+        channel = _channel_from_folder(wav_path.parent.name)
 
         try:
-            info = torchaudio.info(str(wav_path))
-            duration = info.num_frames / info.sample_rate
+            info = sf.info(str(wav_path))
+            duration = info.duration
         except Exception:
             continue
 
-        records.append({
-            "audio_path": str(wav_path.resolve()),
-            "start_sec": 0.0,
-            "end_sec": round(duration, 3),
-            "technique": technique,
-            "channel": channel,
-        })
+        # Sliding window: 10s segments, 1s hop
+        start = 0.0
+        while start + SEGMENT_LENGTH <= duration:
+            records.append({
+                "audio_path": str(wav_path.resolve()),
+                "start_sec": round(start, 3),
+                "end_sec": round(start + SEGMENT_LENGTH, 3),
+                "technique": technique,
+                "channel": channel,
+            })
+            start += HOP_LENGTH
 
     return records
 
