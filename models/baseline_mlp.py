@@ -3,55 +3,69 @@ import torch.nn as nn
 import librosa
 import numpy as np
 
+# Precomputed mel shape constants (must match scripts/precompute_mel.py)
+N_MELS = 128
+HOP_LENGTH = 512
+N_FFT = 2048
+SAMPLE_RATE = 24000
+SEGMENT_FRAMES = int(10.0 * SAMPLE_RATE / HOP_LENGTH)  # 468
+
 
 class MLPBaseline(nn.Module):
     """
     MLP-based technique classifier matching TART's Stage 2 architecture.
-    Input: raw waveform (batch, segment_samples)
+
+    Accepts precomputed mel tensors (n_mels, segment_frames) — use with MelDataset
+    for fast training. Falls back to on-the-fly librosa computation for raw waveforms.
+
+    Input: (batch, n_mels, segment_frames) from MelDataset
+        OR (batch, segment_samples) from GuitarTECHSDataset (slow)
     Output: class logits (batch, num_classes)
-    Uses librosa for mel spectrogram (torchaudio requires torchcodec in this env).
     """
 
     def __init__(
         self,
         num_classes: int,
-        sample_rate: int = 24000,
-        n_mels: int = 128,
-        hop_length: int = 512,
-        hidden_dim: int = 512,
-        dropout: float = 0.5,
+        sample_rate: int = SAMPLE_RATE,
+        n_mels: int = N_MELS,
+        hop_length: int = HOP_LENGTH,
+        hidden_dim: int = 256,
+        dropout: float = 0.3,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.n_mels = n_mels
         self.hop_length = hop_length
 
-        # Compute flattened mel feature size with dummy forward
-        segment_samples = sample_rate * 10
-        dummy = np.zeros(segment_samples, dtype=np.float32)
-        mel = librosa.feature.melspectrogram(y=dummy, sr=sample_rate, n_mels=n_mels, hop_length=hop_length)
-        flat_dim = mel.shape[0] * mel.shape[1]
-
+        # Global average pool over time → (batch, n_mels) → MLP
+        # Much lower-dimensional than flattening (128 vs 59904 features)
         self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(flat_dim, hidden_dim),
+            nn.Linear(n_mels, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, num_classes),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, num_classes),
         )
 
-    def _compute_mel(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (batch, samples) — process each sample with librosa
+    def _to_mel(self, x: torch.Tensor) -> torch.Tensor:
+        """Accepts (batch, n_mels, frames) or (batch, samples). Returns (batch, n_mels, frames)."""
+        if x.ndim == 3:
+            return x
+        # on-the-fly librosa fallback
         batch_mels = []
         for i in range(x.shape[0]):
             audio = x[i].detach().cpu().numpy()
             mel = librosa.feature.melspectrogram(
                 y=audio, sr=self.sample_rate, n_mels=self.n_mels, hop_length=self.hop_length
             )
-            mel_db = librosa.power_to_db(mel, ref=np.max)
-            batch_mels.append(torch.from_numpy(mel_db))
-        return torch.stack(batch_mels)  # (batch, n_mels, time_frames)
+            batch_mels.append(torch.from_numpy(librosa.power_to_db(mel, ref=np.max)))
+        return torch.stack(batch_mels)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        mel = self._compute_mel(x).to(x.device)
-        return self.classifier(mel)
+        device = next(self.parameters()).device
+        mel = self._to_mel(x).to(device)          # (batch, n_mels, frames)
+        pooled = mel.mean(dim=-1)                  # (batch, n_mels) — global avg pool
+        return self.classifier(pooled)

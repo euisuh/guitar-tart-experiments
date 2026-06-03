@@ -21,6 +21,7 @@ import wandb
 
 from training.config import ExperimentConfig, parse_config, TECHNIQUE_CLASSES
 from data.dataset import GuitarTECHSDataset
+from data.mel_dataset import MelDataset
 from data.augment import build_train_transform
 from models.mert_classifier import MERTClassifier
 from models.baseline_mlp import MLPBaseline
@@ -85,14 +86,19 @@ def main():
         config={**cfg.to_dict(), "git_hash": get_git_hash(), "device": device},
     )
 
-    segment_samples = int(cfg.segment_length * cfg.sample_rate)
-    train_transform = build_train_transform(cfg.sample_rate, segment_samples)
-
-    train_ds, val_ds = GuitarTECHSDataset.train_val_split(
-        cfg.annotations_csv, train_ratio=cfg.train_split,
-        sample_rate=cfg.sample_rate, segment_length=cfg.segment_length,
-        transform=train_transform,
-    )
+    if cfg.model_type == "mlp":
+        # Fast path: use precomputed mel spectrograms (run scripts/precompute_mel.py first)
+        mel_csv = cfg.annotations_csv.replace("annotations.csv", "mel_annotations.csv")
+        print(f"MLP mode: loading precomputed mel from {mel_csv}")
+        train_ds, val_ds = MelDataset.train_val_split(mel_csv, split_by_musician=True)
+    else:
+        segment_samples = int(cfg.segment_length * cfg.sample_rate)
+        train_transform = build_train_transform(cfg.sample_rate, segment_samples)
+        train_ds, val_ds = GuitarTECHSDataset.train_val_split(
+            cfg.annotations_csv, train_ratio=cfg.train_split,
+            sample_rate=cfg.sample_rate, segment_length=cfg.segment_length,
+            transform=train_transform,
+        )
 
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True,
                               num_workers=cfg.num_workers, collate_fn=collate_fn, drop_last=True)
