@@ -1,9 +1,8 @@
 # tests/conftest.py
 import pytest
-import torch
+import soundfile as sf
 import pandas as pd
 import numpy as np
-import scipy.io.wavfile
 from pathlib import Path
 
 SAMPLE_RATE = 24000
@@ -23,7 +22,7 @@ def tmp_audio_dir(tmp_path):
         freq = 220.0 * (1 + TECHNIQUE_CLASSES.index(technique) * 0.1)
         t = np.linspace(0, DURATION_SEC, n_samples, dtype=np.float32)
         waveform = (0.5 * np.sin(2 * np.pi * freq * t)).astype(np.float32)
-        scipy.io.wavfile.write(str(wav_path), SAMPLE_RATE, waveform)
+        sf.write(str(wav_path), waveform, SAMPLE_RATE)
         paths[technique] = str(wav_path)
     return paths
 
