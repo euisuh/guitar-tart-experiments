@@ -95,13 +95,19 @@ def main():
                                num_classes=num_classes, sample_rate=args.sample_rate)
     model.load_state_dict(ckpt["model_state"])
     model = model.to(device)
-    _, val_ds = GuitarTECHSDataset.train_val_split(args.annotations_csv,
-                                                    sample_rate=args.sample_rate,
-                                                    segment_length=args.segment_length)
 
     def collate_fn(batch):
-        waveforms, labels, _ = zip(*batch)
-        return torch.stack(waveforms), torch.tensor(labels)
+        features, labels, _ = zip(*batch)
+        return torch.stack(features), torch.tensor(labels)
+
+    if model_type == "mlp":
+        from data.mel_dataset import MelDataset
+        mel_csv = args.annotations_csv.replace("annotations.csv", "mel_annotations.csv")
+        _, val_ds = MelDataset.train_val_split(mel_csv, split_by_musician=True)
+    else:
+        _, val_ds = GuitarTECHSDataset.train_val_split(args.annotations_csv,
+                                                        sample_rate=args.sample_rate,
+                                                        segment_length=args.segment_length)
 
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, collate_fn=collate_fn)
     metrics = run_eval(model, val_loader, device)
