@@ -1,8 +1,9 @@
 import torch
 from torch.utils.data import Dataset
+import soundfile as sf
+import librosa
 import pandas as pd
 import numpy as np
-import scipy.io.wavfile
 from typing import Optional, Tuple, Dict, List, Callable
 
 TECHNIQUE_CLASSES = ["bend", "harmonic", "palm_mute", "pinch_harmonic", "vibrato", "clean"]
@@ -60,17 +61,9 @@ class GuitarTECHSDataset(Dataset):
         return waveform, label, metadata
 
     def _load_segment(self, audio_path: str, start_sec: float, end_sec: float) -> torch.Tensor:
-        sr, data = scipy.io.wavfile.read(audio_path)
+        data, sr = sf.read(audio_path, dtype="float32", always_2d=False)
 
-        # Convert to float32 in [-1, 1]
-        if data.dtype == np.int16:
-            data = data.astype(np.float32) / 32768.0
-        elif data.dtype == np.int32:
-            data = data.astype(np.float32) / 2147483648.0
-        else:
-            data = data.astype(np.float32)
-
-        # Handle stereo — average channels
+        # Mono: average channels if stereo
         if data.ndim > 1:
             data = data.mean(axis=1)
 
@@ -79,17 +72,11 @@ class GuitarTECHSDataset(Dataset):
         num_frames = int((end_sec - start_sec) * sr)
         data = data[frame_offset: frame_offset + num_frames]
 
-        waveform = torch.from_numpy(data)
-
-        # Resample if needed
+        # Resample with librosa's polyphase resampler (proper anti-aliasing)
         if sr != self.sample_rate:
-            waveform = waveform.unsqueeze(0)
-            waveform = torch.nn.functional.interpolate(
-                waveform.unsqueeze(0),
-                size=int(len(waveform) * self.sample_rate / sr),
-                mode="linear",
-                align_corners=False,
-            ).squeeze(0).squeeze(0)
+            data = librosa.resample(data, orig_sr=sr, target_sr=self.sample_rate)
+
+        waveform = torch.from_numpy(data.copy())
 
         # Truncate or pad to segment_samples
         length = waveform.shape[0]
