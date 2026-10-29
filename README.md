@@ -1,19 +1,19 @@
 # guitar-tart-experiments
 
-**Goal:** Beat TART's 76% technique classification accuracy on Guitar-TECHS using MERT finetuning.
+**Status: in progress. No results yet.** Code and plan for finetuning MERT for guitar technique classification on Guitar-TECHS, with the TART paper's reported accuracy as the reference point. Nothing here has been shown to beat it.
 
-## Approach
+## Plan
 
-TART (arXiv 2510.02597) uses an MLP classifier with hand-crafted Mel features — weak on rare techniques (<100 samples each). We replace it with [MERT-v1](https://huggingface.co/m-a-p/MERT-v1-95M), a music foundation model pretrained on 160k hours of music, finetuned on Guitar-TECHS.
+TART (arXiv 2510.02597) is reported to use an MLP classifier on Mel features, with 76% technique accuracy (figure taken from the paper, not reproduced here). Hypothesis to test: finetuning [MERT-v1](https://huggingface.co/m-a-p/MERT-v1-95M), a pretrained music model, does better on rare techniques than that baseline. The repo has the dataset prep, training loop, MLP baseline, and evaluation script for this; no runs are recorded yet.
 
-## Baselines
+## Results
 
 | Model | Overall Acc | Macro F1 |
 |---|---|---|
-| TART MLP (paper, trained on IDMT) | 76% | — |
-| MLP Baseline (ours, Guitar-TECHS) | TBD | TBD |
-| MERT-95M (local MPS/CPU) | TBD | TBD |
-| MERT-330M (cloud CUDA) | TBD | TBD |
+| TART MLP (paper, trained on IDMT) | 76% (reported in paper) | not reported here |
+| MLP baseline (this repo, Guitar-TECHS) | not run yet | not run yet |
+| MERT-95M (local MPS/CPU) | not run yet | not run yet |
+| MERT-330M (cloud CUDA) | not run yet | not run yet |
 
 ## Setup
 
@@ -61,8 +61,7 @@ Prints accuracy, macro F1, per-class F1 vs TART baseline. Saves confusion matrix
 ## Tests
 
 ```bash
-# Use conda Python (has all deps)
-/opt/homebrew/Caskroom/miniconda/base/bin/python -m pytest tests/ -v
+python -m pytest tests/ -v
 ```
 
 ## Cloud (Colab)
